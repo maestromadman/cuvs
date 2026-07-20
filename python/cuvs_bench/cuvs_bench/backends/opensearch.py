@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 
 from .base import BenchmarkBackend, BuildResult, Dataset, SearchResult
+from ._utils import compute_recall
 from ..orchestrator.config_loaders import (
     ConfigLoader,
     DatasetConfig,
@@ -957,11 +958,17 @@ class OpenSearchBackend(BenchmarkBackend):
             elapsed = time.perf_counter() - t0
             qps = n_queries / elapsed if elapsed > 0 else 0.0
 
+            recall = 0.0
+            gt = dataset.groundtruth_neighbors
+            if gt is not None and gt.size > 0:
+                recall = compute_recall(neighbors, gt, k)
+
             per_param_results.append(
                 {
                     "search_params": sp,
                     "search_time_ms": elapsed * 1000.0,
                     "queries_per_second": qps,
+                    "recall": recall,
                     "batch_size": batch_size,
                     "num_batches": n_batches,
                 }
