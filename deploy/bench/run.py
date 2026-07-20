@@ -59,10 +59,15 @@ def banner(msg: str) -> None:
 
 
 def _recall_for_entry(
-    result: SearchResult, entry_index: int, entry_count: int
+    result: SearchResult, entry: dict, entry_index: int, entry_count: int
 ) -> float | None:
-    # cuVS computes recall in the orchestrator from SearchResult.neighbors. The
-    # OpenSearch backend returns neighbors for the final search-parameter run.
+    # Prefer the per-ef_search recall the OpenSearch backend records in
+    # per_search_param_results. Fall back to the top-level scalar (populated by
+    # the orchestrator from SearchResult.neighbors for the final search-parameter
+    # run only) for older payloads that lack per-point recall.
+    recall = entry.get("recall")
+    if recall is not None:
+        return float(recall)
     if entry_index == entry_count - 1:
         return float(result.recall)
     return None
@@ -171,7 +176,9 @@ def write_result_files(
             continue
         per_param = (search_r.metadata or {}).get("per_search_param_results", [])
         for entry_index, entry in enumerate(per_param):
-            recall = _recall_for_entry(search_r, entry_index, len(per_param))
+            recall = _recall_for_entry(
+                search_r, entry, entry_index, len(per_param)
+            )
             if recall is None:
                 skipped_without_recall += 1
                 continue
@@ -235,7 +242,7 @@ def print_results(results: list) -> None:
         per_param = (r.metadata or {}).get("per_search_param_results", [])
         entry_count = len(per_param)
         for entry_index, entry in enumerate(per_param):
-            recall = _recall_for_entry(r, entry_index, entry_count)
+            recall = _recall_for_entry(r, entry, entry_index, entry_count)
             if recall is None:
                 missing_recall_rows += 1
                 continue
