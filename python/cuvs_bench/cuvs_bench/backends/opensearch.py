@@ -224,6 +224,14 @@ _DISTANCE_TO_SPACE_TYPE: Dict[str, str] = {
 _DEFAULT_REMOTE_BUILD_TIMEOUT = 30 * 60
 _REMOTE_BUILD_START_TIMEOUT = 30.0
 
+# Maximum number of transient remote (GPU) build failures to tolerate before
+# aborting. When a segment's remote build fails, OpenSearch falls back to a CPU
+# build for that segment, so the index stays complete. At large scale (~350
+# build submits per 10M index) an occasional flake is near-certain, so aborting
+# on the first failure would make a full sweep effectively unrunnable. Override
+# with the ``REMOTE_BUILD_MAX_FAILURES`` environment variable.
+_DEFAULT_REMOTE_BUILD_MAX_FAILURES = 50
+
 _REMOTE_BUILD_MERGE_OPS = "remote_index_build_current_merge_operations"
 _REMOTE_BUILD_FLUSH_OPS = "remote_index_build_current_flush_operations"
 _REMOTE_BUILD_REQUEST_SUCCESS_COUNT = "build_request_success_count"
@@ -290,6 +298,7 @@ class OpenSearchBackend(BenchmarkBackend):
     def __init__(self, config: Dict[str, Any]):
         super().__init__(config)
         self.__client = None
+        self._warned_remote_build_failures = False
 
     @property
     def algo(self) -> str:
@@ -603,10 +612,27 @@ class OpenSearchBackend(BenchmarkBackend):
             build_failure_delta = self._remote_build_delta(
                 stats, initial_stats, _REMOTE_BUILD_FAILURE_COUNT
             )
-            if request_failure_delta > 0 or build_failure_delta > 0:
+            # Tolerate a bounded number of transient remote-build failures.
+            # OpenSearch CPU-falls-back a failed segment, so the index stays
+            # complete; only abort once failures exceed the tolerance.
+            total_failures = request_failure_delta + build_failure_delta
+            max_failures = int(
+                os.environ.get(
+                    "REMOTE_BUILD_MAX_FAILURES",
+                    _DEFAULT_REMOTE_BUILD_MAX_FAILURES,
+                )
+            )
+            if total_failures > max_failures:
                 raise RuntimeError(
-                    "GPU build failed via kNN stats API: "
+                    f"GPU build failed via kNN stats API ({total_failures} "
+                    f"remote-build failures exceed tolerance {max_failures}): "
                     f"{self._format_remote_build_stats(stats)}"
+                )
+            if total_failures > 0 and not self._warned_remote_build_failures:
+                self._warned_remote_build_failures = True
+                print(
+                    f"  Tolerating {total_failures} transient remote-build "
+                    "failure(s); CPU fallback keeps the index complete."
                 )
 
             submitted_delta = self._remote_build_delta(
