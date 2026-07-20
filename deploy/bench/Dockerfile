@@ -10,7 +10,13 @@ RUN apt-get update \
 # nvcc, and cuvs_bench declares a hard dep on the `cuvs` CUDA package).
 # The opensearch backend is pure Python and needs neither, so we add the
 # package directly to PYTHONPATH and install only the actual runtime deps.
-RUN git clone --depth=1 --filter=blob:none --sparse https://github.com/rapidsai/cuvs.git /opt/cuvs \
+#
+# Pinned to the fork/branch carrying the per-ef_search recall fix in the
+# OpenSearch backend. Override with --build-arg CUVS_REPO / CUVS_REF.
+ARG CUVS_REPO=https://github.com/maestromadman/cuvs.git
+ARG CUVS_REF=cuvs-bench-opensearch-ajmallya-recallsweep
+RUN git clone --depth=1 --filter=blob:none --sparse \
+      --branch "${CUVS_REF}" "${CUVS_REPO}" /opt/cuvs \
     && cd /opt/cuvs \
     && git sparse-checkout set python/cuvs_bench
 
