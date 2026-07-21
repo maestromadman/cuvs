@@ -944,18 +944,26 @@ class OpenSearchBackend(BenchmarkBackend):
                 batch_end = min(batch_start + batch_size, n_queries)
                 body: List[Dict[str, Any]] = []
                 for q_vec in query_vectors[batch_start:batch_end]:
+                    knn_vector: Dict[str, Any] = {
+                        "vector": q_vec.tolist(),
+                        "k": k,
+                    }
+                    if engine == "faiss":
+                        # The index-level ``index.knn.algo_param.ef_search``
+                        # setting is NOT honored by the faiss engine at query
+                        # time (faiss binds ef_search at segment load), so the
+                        # per-index put_settings above has no effect on results.
+                        # The per-query ``method_parameters.ef_search`` is the
+                        # effective knob (OpenSearch 2.16+); without it the whole
+                        # ef_search sweep collapses to faiss's default ef.
+                        knn_vector["method_parameters"] = {
+                            "ef_search": ef_search
+                        }
                     body.append({})
                     body.append(
                         {
                             "size": k,
-                            "query": {
-                                "knn": {
-                                    "vector": {
-                                        "vector": q_vec.tolist(),
-                                        "k": k,
-                                    }
-                                }
-                            },
+                            "query": {"knn": {"vector": knn_vector}},
                         }
                     )
 
